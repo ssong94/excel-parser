@@ -8,7 +8,7 @@ import java.lang.annotation.Target;
 @Retention(value = RetentionPolicy.RUNTIME)
 @Target({ElementType.FIELD})
 public @interface Date {
-	String pattern() default "yyyy-mm-dd";
+	String pattern() default "yyyy-MM-dd";
 
 
 }

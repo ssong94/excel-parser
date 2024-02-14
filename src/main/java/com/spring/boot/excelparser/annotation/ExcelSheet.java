@@ -11,9 +11,14 @@ public @interface ExcelSheet {
 
 	int start();
 
+	/**
+	 * -1이면 모든 Row를 읽는다.
+	 * @return
+	 */
 	int end() default -1;
 
 	int sheetNumber() default 0;
+
 
 	ParseType parseType() default ParseType.ROW;
 
