@@ -6,11 +6,14 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
 import org.apache.logging.log4j.message.ParameterizedMessage;
 import org.apache.poi.ss.usermodel.Cell;
 import org.apache.poi.ss.usermodel.DataFormatter;
 
 
+@NoArgsConstructor(access = AccessLevel.PRIVATE)
 public class FormatHelper {
 
 	private final static DataFormatter fmt;
@@ -66,8 +69,8 @@ public class FormatHelper {
 	}
 
 	private static LocalDate toLocalDate(String value, String pattern) {
-		try{
-		DateTimeFormatter formatter = DateTimeFormatter.ofPattern(pattern);
+		try {
+			DateTimeFormatter formatter = DateTimeFormatter.ofPattern(pattern);
 			return LocalDate.parse(value, formatter);
 		} catch (DateTimeParseException e) {
 			throw new InvalidCellValueException(format("유효하지 않는 패턴입니다. 입력값= {}", value));
