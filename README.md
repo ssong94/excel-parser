@@ -34,11 +34,11 @@
 ```java
 void sheetParserTest() {
 	
-	ExcelResult<TextObject> result = ExcelParser.parse(mf, TextObject.class);
+	ExcelResult<TestObject> result = ExcelParser.parse(mf, TestObject.class);
 
         String sheetName = result.sheetName(); // 시트명
         List<String> headerNames = result.headerNames(); // 컬럼명
-        List<TestSheet> successData = result.successData(); // 파싱에 성공한 데이터
+        List<TestObject> successData = result.successData(); // 파싱에 성공한 데이터
         List<Error> errors = result.errors(); // 에러 정보
                                              /* detail
                                                 1. row: 행 번호
