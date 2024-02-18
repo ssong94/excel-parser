@@ -1,11 +1,9 @@
 package com.spring.boot.excelparser;
 
-import com.spring.boot.excelparser.annotation.Date;
-import com.spring.boot.excelparser.annotation.ExcelColumn;
-import com.spring.boot.excelparser.annotation.ExcelSheet;
 import com.spring.boot.excelparser.exception.ExcelParserException;
 import com.spring.boot.excelparser.exception.InvalidCellValueException;
 import com.spring.boot.excelparser.helper.FormatHelper;
+import com.spring.boot.excelparser.vo.ClassInfo;
 import com.spring.boot.excelparser.vo.Error;
 import com.spring.boot.excelparser.vo.ExcelResult;
 import java.io.IOException;
@@ -13,6 +11,7 @@ import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.function.IntBinaryOperator;
 import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
@@ -27,19 +26,17 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
-public class ExcelParser {
+public final class ExcelParser {
 
 	private static final List<String> EXCEL_EXTENSIONS = List.of("xlsx", "cvs");
-	public static final int STANDARD_NUMBER = 1;
-
 
 	public static <T> ExcelResult<T> parse(MultipartFile mf, Class<T> clazz) {
 
 		validateExtension(mf.getOriginalFilename());
-		validateAnnotation(clazz);
+		ClassInfo<T> classInfo = ClassInfo.from(clazz);
 
 		try (Workbook workbook = WorkbookFactory.create(mf.getInputStream())) {
-			return doParsing(workbook, clazz);
+			return doParsing(workbook, classInfo);
 		} catch (IOException ex) {
 			throw new ExcelParserException(ex.getMessage(), ex);
 		} catch (EncryptedDocumentException ex) {
@@ -52,25 +49,6 @@ public class ExcelParser {
 
 	}
 
-	private static void validateAnnotation(Class<?> clazz) {
-
-		ExcelSheet annotation = clazz.getAnnotation(ExcelSheet.class);
-
-		if (annotation == null) {
-			throw new ExcelParserException("ExcelSheet 어노테이션이 존재하지 않습니다.");
-		}
-		if (annotation.sheetNumber() <= 0) {
-			throw new ExcelParserException("시작 값이 0보다 작을 수 없습니다.");
-		}
-		if (annotation.start() <= 0) {
-			throw new ExcelParserException("시작 값이 0보다 작을 수  수 없습니다.");
-		}
-		if (annotation.end() < -1) {
-			throw new ExcelParserException("종료 값이 -1보다 작을 수 없습니다.");
-		}
-
-	}
-
 	private static void validateExtension(String fileName) {
 		String extension = FilenameUtils.getExtension(fileName);
 		if (!EXCEL_EXTENSIONS.contains(extension)) {
@@ -78,24 +56,21 @@ public class ExcelParser {
 		}
 	}
 
-	public static <T> ExcelResult<T> doParsing(Workbook workbook, Class<T> tClass) {
+	public static <T> ExcelResult<T> doParsing(Workbook workbook, ClassInfo<T> classInfo) {
 
-		Sheet sheet = validateAndGetSheet(workbook, tClass);
+		Sheet sheet = validateAndGetSheet(workbook, classInfo.getSheetNumber());
 
-		int totalRowCount = sheet.getLastRowNum();
-		ExcelSheet excelSheet = tClass.getAnnotation(ExcelSheet.class);
-		int start = getStart(excelSheet);
-		int end = getEnd(excelSheet);
-		int rowCount = (end == -1) ? totalRowCount : end;
-
-		Field[] fields = tClass.getDeclaredFields();
+		int lastRowNum = sheet.getLastRowNum();
+		int annotationEndNum = classInfo.getEnd();
+		int rowCount = (annotationEndNum == -1) ? lastRowNum : annotationEndNum;
 
 		List<T> successData = new ArrayList<>();
 		List<Error> errors = new ArrayList<>();
 
+		int start = classInfo.getStart();
 		for (int i = start; i <= rowCount; i++) {
 			Row row = sheet.getRow(i);
-			T instance = createNewInstanceAndFillData(row, tClass, fields, errors);
+			T instance = createNewInstanceAndFillData(row, classInfo, errors);
 			// null값이 들어오면 실패로 인식한다.
 			if (instance == null) {
 				continue;
@@ -106,51 +81,16 @@ public class ExcelParser {
 
 		return ExcelResult.<T>builder()
 				.sheetName(sheet.getSheetName())
-				.headerNames(getHeaderNames(fields))
+				.headerNames(classInfo.getHeaderNames())
 				.successData(successData)
 				.errors(errors)
 				.build();
 	}
 
-	private static int getStart(ExcelSheet annotation) {
-		return annotation.start() - STANDARD_NUMBER;
 
-	}
-
-	private static int getEnd(ExcelSheet annotation) {
-		return annotation.end() - STANDARD_NUMBER;
-	}
-
-	private static int getSheetNumber(ExcelSheet annotation) {
-		return annotation.sheetNumber() - STANDARD_NUMBER;
-	}
-
-	private static int getColumnOrder(ExcelColumn annotation) {
-		return annotation.order() - STANDARD_NUMBER;
-	}
-
-	private static List<String> getHeaderNames(Field[] fields) {
-		String[] columnArr = new String[fields.length];
-
-		for (Field field : fields) {
-			ExcelColumn columnAnno = field.getAnnotation(ExcelColumn.class);
-			if (columnAnno != null) {
-				int index = getColumnOrder(columnAnno);
-				columnArr[index] = columnAnno.headerName();
-			}
-		}
-
-		return List.of(columnArr);
-	}
-
-
-	private static Sheet validateAndGetSheet(Workbook workbook, Class<?> clazz) {
-		ExcelSheet annotation = clazz.getAnnotation(ExcelSheet.class);
-		Sheet sheet = workbook.getSheetAt(getSheetNumber(annotation));
-		if (sheet == null) {
-			throw new ExcelParserException("선택하신 Sheet가 존재하지 않습니다.");
-		}
-		return sheet;
+	private static Sheet validateAndGetSheet(Workbook workbook, int sheetNumber) {
+		return Optional.ofNullable(workbook.getSheetAt(sheetNumber))
+				.orElseThrow(() -> new ExcelParserException("선택하신 Sheet가 존재하지 않습니다."));
 	}
 
 
@@ -164,37 +104,37 @@ public class ExcelParser {
 		}
 	}
 
-	private static String getDatePattern(Field field) {
-		Date dateAnno = field.getAnnotation(Date.class);
-		return dateAnno == null ? "" : dateAnno.pattern();
+	private static <T> void setFieldData(T instance, Field field, Object value) {
+		try {
+			field.setAccessible(true);
+			field.set(instance, value);
+		} catch (IllegalArgumentException | IllegalAccessException e) {
+			throw new InvalidCellValueException("타입이 일치하지 않습니다.");
+		}
 	}
 
-	private static <T> T createNewInstanceAndFillData(Row row, Class<T> tClass, Field[] fields, List<Error> errors) {
 
-		T instance = createNewInstance(tClass);
+	private static <T> T createNewInstanceAndFillData(Row row, ClassInfo<T> classInfo, List<Error> errors) {
+
+		T instance = createNewInstance(classInfo.getTClass());
 
 		boolean isAllEmpty = true; // Row에서 모든 값이 비어있으면 null을 리턴해서 성공으로 치지 않는다.
 		boolean failure = false; // Row에서 하나라도 예외가 터지면 null을 리턴해서 성공으로 치지 않는다.
 
-		for (Field field : fields) {
+		for (Field field : classInfo.getFields()) {
 
-			ExcelColumn columnAnno = field.getAnnotation(ExcelColumn.class);
-
-			if (columnAnno == null) {
-				continue;
-			}
-
-			Cell cell = row.getCell(getColumnOrder(columnAnno));
+			int fieldOrder = classInfo.getColumnOrder(field);
+			Cell cell = row.getCell(fieldOrder);
 			String value = FormatHelper.toString(cell);
 
 			try {
 
-				Object o = FormatHelper.toFieldType(value, field.getType(), getDatePattern(field));
+				Object o = FormatHelper.toFieldType(value, field.getType(), classInfo.getDatePattern(field));
 				setFieldData(instance, field, o);
 
 				boolean hasText = StringUtils.hasText(value);
 
-				if (columnAnno.required() && !hasText) {
+				if (classInfo.required(field) && !hasText) {
 					throw new InvalidCellValueException("필수값입니다.");
 				}
 
@@ -206,7 +146,7 @@ public class ExcelParser {
 
 				failure = true;
 
-				String message = columnAnno.message();
+				String message = classInfo.getMessage(field);
 				String exceptionMessage = ex.getMessage();
 
 				String cause = (StringUtils.hasText(message))
@@ -214,10 +154,11 @@ public class ExcelParser {
 						: exceptionMessage;
 
 				IntBinaryOperator sumFn = Integer::sum;
+				int standard_number = ClassInfo.STANDARD_NUMBER;
 
 				Error error = Error.builder()
-						.row(sumFn.applyAsInt(row.getRowNum(), STANDARD_NUMBER))
-						.column(sumFn.applyAsInt(cell.getColumnIndex(), STANDARD_NUMBER))
+						.row(sumFn.applyAsInt(row.getRowNum(), standard_number))
+						.column(sumFn.applyAsInt(cell.getColumnIndex(), standard_number))
 						.value(value)
 						.cause(cause)
 						.build();
@@ -232,15 +173,6 @@ public class ExcelParser {
 		}
 
 		return instance;
-	}
-
-	private static <T> void setFieldData(T instance, Field field, Object value) {
-		try {
-			field.setAccessible(true);
-			field.set(instance, value);
-		} catch (IllegalArgumentException | IllegalAccessException e) {
-			throw new InvalidCellValueException("타입이 일치하지 않습니다.");
-		}
 	}
 
 
